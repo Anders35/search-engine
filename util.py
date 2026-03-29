@@ -1,41 +1,36 @@
 class IdMap:
     """
-    Ingat kembali di kuliah, bahwa secara praktis, sebuah dokumen dan
-    sebuah term akan direpresentasikan sebagai sebuah integer. Oleh
-    karena itu, kita perlu maintain mapping antara string term (atau
-    dokumen) ke integer yang bersesuaian, dan sebaliknya. Kelas IdMap ini
-    akan melakukan hal tersebut.
+    In practice, documents and terms are represented by integer IDs.
+    This class maintains a two-way mapping between strings and integer IDs.
     """
 
     def __init__(self):
         """
-        Mapping dari string (term atau nama dokumen) ke id disimpan dalam
-        python's dictionary; cukup efisien. Mapping sebaliknya disimpan dalam
-        python's list.
+        The mapping from string (term or document name) to ID is stored in a
+        Python dictionary. The reverse mapping is stored in a Python list.
 
-        contoh:
-            str_to_id["halo"] ---> 8
+        Example:
+            str_to_id["hello"] ---> 8
             str_to_id["/collection/dir0/gamma.txt"] ---> 54
 
-            id_to_str[8] ---> "halo"
+            id_to_str[8] ---> "hello"
             id_to_str[54] ---> "/collection/dir0/gamma.txt"
         """
         self.str_to_id = {}
         self.id_to_str = []
 
     def __len__(self):
-        """Mengembalikan banyaknya term (atau dokumen) yang disimpan di IdMap."""
+        """Return the number of terms (or documents) stored in IdMap."""
         return len(self.id_to_str)
 
     def __get_str(self, i):
-        """Mengembalikan string yang terasosiasi dengan index i."""
+        """Return the string associated with index i."""
         return self.id_to_str[i]
 
     def __get_id(self, s):
         """
-        Mengembalikan integer id i yang berkorespondensi dengan sebuah string s.
-        Jika s tidak ada pada IdMap, lalu assign sebuah integer id baru dan kembalikan
-        integer id baru tersebut.
+        Return the integer ID associated with string s.
+        If s is not in IdMap, assign a new integer ID and return it.
         """
         if s not in self.str_to_id:
             self.id_to_str.append(s)
@@ -44,17 +39,15 @@ class IdMap:
 
     def __getitem__(self, key):
         """
-        __getitem__(...) adalah special method di Python, yang mengizinkan sebuah
-        collection class (seperti IdMap ini) mempunyai mekanisme akses atau
-        modifikasi elemen dengan syntax [..] seperti pada list dan dictionary di Python.
+        __getitem__(...) is a Python special method that enables [] access
+        syntax for custom collection classes.
 
-        Silakan search informasi ini di Web search engine favorit Anda. Saya mendapatkan
-        link berikut:
+        Reference:
 
         https://stackoverflow.com/questions/43627405/understanding-getitem-method
 
-        Jika key adalah integer, gunakan __get_str;
-        jika key adalah string, gunakan __get_id
+        If key is an integer, use __get_str.
+        If key is a string, use __get_id.
         """
         if type(key) is int:
             return self.__get_str(key)
@@ -65,26 +58,25 @@ class IdMap:
 
 def sorted_merge_posts_and_tfs(posts_tfs1, posts_tfs2):
     """
-    Menggabung (merge) dua lists of tuples (doc id, tf) dan mengembalikan
-    hasil penggabungan keduanya (TF perlu diakumulasikan untuk semua tuple
-    dengn doc id yang sama), dengan aturan berikut:
+    Merge two sorted lists of tuples (doc_id, tf) and return a sorted merged
+    result. TF values are accumulated for matching doc IDs.
 
-    contoh: posts_tfs1 = [(1, 34), (3, 2), (4, 23)]
-            posts_tfs2 = [(1, 11), (2, 4), (4, 3 ), (6, 13)]
+    Example: posts_tfs1 = [(1, 34), (3, 2), (4, 23)]
+             posts_tfs2 = [(1, 11), (2, 4), (4, 3 ), (6, 13)]
 
-            return   [(1, 34+11), (2, 4), (3, 2), (4, 23+3), (6, 13)]
-                   = [(1, 45), (2, 4), (3, 2), (4, 26), (6, 13)]
+             return   [(1, 34+11), (2, 4), (3, 2), (4, 23+3), (6, 13)]
+                    = [(1, 45), (2, 4), (3, 2), (4, 26), (6, 13)]
 
     Parameters
     ----------
     list1: List[(Comparable, int)]
     list2: List[(Comparable, int]
-        Dua buah sorted list of tuples yang akan di-merge.
+        Two sorted lists of tuples to be merged.
 
     Returns
     -------
     List[(Comparablem, int)]
-        Penggabungan yang sudah terurut
+        Sorted merged result.
     """
     i, j = 0, 0
     merge = []
@@ -114,19 +106,19 @@ def test(output, expected):
 
 if __name__ == '__main__':
 
-    doc = ["halo", "semua", "selamat", "pagi", "semua"]
+    doc = ["hello", "everyone", "good", "morning", "everyone"]
     term_id_map = IdMap()
-    assert [term_id_map[term] for term in doc] == [0, 1, 2, 3, 1], "term_id salah"
-    assert term_id_map[1] == "semua", "term_id salah"
-    assert term_id_map[0] == "halo", "term_id salah"
-    assert term_id_map["selamat"] == 2, "term_id salah"
-    assert term_id_map["pagi"] == 3, "term_id salah"
+    assert [term_id_map[term] for term in doc] == [0, 1, 2, 3, 1], "term_id is incorrect"
+    assert term_id_map[1] == "everyone", "term_id is incorrect"
+    assert term_id_map[0] == "hello", "term_id is incorrect"
+    assert term_id_map["good"] == 2, "term_id is incorrect"
+    assert term_id_map["morning"] == 3, "term_id is incorrect"
 
     docs = ["/collection/0/data0.txt",
             "/collection/0/data10.txt",
             "/collection/1/data53.txt"]
     doc_id_map = IdMap()
-    assert [doc_id_map[docname] for docname in docs] == [0, 1, 2], "docs_id salah"
+    assert [doc_id_map[docname] for docname in docs] == [0, 1, 2], "docs_id is incorrect"
 
     assert sorted_merge_posts_and_tfs([(1, 34), (3, 2), (4, 23)], \
-                                      [(1, 11), (2, 4), (4, 3 ), (6, 13)]) == [(1, 45), (2, 4), (3, 2), (4, 26), (6, 13)], "sorted_merge_posts_and_tfs salah"
+                                      [(1, 11), (2, 4), (4, 3 ), (6, 13)]) == [(1, 45), (2, 4), (3, 2), (4, 26), (6, 13)], "sorted_merge_posts_and_tfs is incorrect"
