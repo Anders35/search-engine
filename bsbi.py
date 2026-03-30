@@ -376,7 +376,8 @@ class BSBIIndex:
                 if not postings:
                     continue
 
-                max_tf = term_meta[4] if len(term_meta) >= 5 else (max(tf_list) if tf_list else 0)
+                # postings_dict tuple layout stores max_tf at index 5.
+                max_tf = term_meta[5] if len(term_meta) >= 6 else (max(tf_list) if tf_list else 0)
                 ub = self._bm25_term_upper_bound(max_tf, idf, min_dl, avg_dl, k1, b)
                 states.append({
                     'postings': postings,
