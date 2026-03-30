@@ -72,15 +72,17 @@ class IdMap:
 
 
 class TermFST:
-    """A simple deterministic FST for mapping terms (strings) to integer IDs."""
+    """A deterministic acyclic FST acceptor for vocabulary terms."""
 
     def __init__(self):
+        self.root_state = 0
         self.transitions = [{}]
         self.outputs = [None]
+        self.is_minimized = False
 
-    def add(self, term, output):
-        """Add term with its output ID into the transducer."""
-        state = 0
+    def _add_raw(self, term, output):
+        """Internal insertion into mutable trie-shaped automaton."""
+        state = self.root_state
         for ch in term:
             next_state = self.transitions[state].get(ch)
             if next_state is None:
@@ -91,9 +93,114 @@ class TermFST:
             state = next_state
         self.outputs[state] = output
 
+    def _iter_entries(self):
+        """Yield all accepted terms from the current automaton."""
+        stack = [(self.root_state, "")]
+        while stack:
+            state, prefix = stack.pop()
+            out = self.outputs[state]
+            if out is not None:
+                yield (prefix, out)
+
+            # Reverse-sorted push keeps lexical visit order when popping.
+            for ch, child in sorted(self.transitions[state].items(), reverse = True):
+                stack.append((child, prefix + ch))
+
+    def _ensure_mutable(self):
+        """Expand minimized DAG back into mutable trie representation."""
+        if not self.is_minimized:
+            return
+
+        entries = list(self._iter_entries())
+        self.root_state = 0
+        self.transitions = [{}]
+        self.outputs = [None]
+        self.is_minimized = False
+
+        for term, output in entries:
+            self._add_raw(term, output)
+
+    def _canonical_signature(self, state, memo, registry):
+        """Return canonical state ID for this state's right-language signature."""
+        if state in memo:
+            return memo[state]
+
+        child_signature = []
+        for ch, child in sorted(self.transitions[state].items()):
+            child_signature.append((ch, self._canonical_signature(child, memo, registry)))
+        signature = (self.outputs[state], tuple(child_signature))
+
+        if signature in registry:
+            canon_state = registry[signature]
+        else:
+            canon_state = len(registry)
+            registry[signature] = canon_state
+
+        memo[state] = canon_state
+        return canon_state
+
+    def _reindex_from_root(self, root_state, canon_transitions, canon_outputs):
+        """Reindex minimized automaton so the root state becomes state 0."""
+        old_to_new = {}
+        order = []
+
+        def dfs(state):
+            if state in old_to_new:
+                return
+            old_to_new[state] = len(order)
+            order.append(state)
+            for _, child in sorted(canon_transitions[state].items()):
+                dfs(child)
+
+        dfs(root_state)
+
+        new_transitions = [{} for _ in order]
+        new_outputs = [None for _ in order]
+        for old_state, new_state in old_to_new.items():
+            new_outputs[new_state] = canon_outputs[old_state]
+            for ch, child in canon_transitions[old_state].items():
+                new_transitions[new_state][ch] = old_to_new[child]
+
+        self.root_state = 0
+        self.transitions = new_transitions
+        self.outputs = new_outputs
+
+    def minimize(self):
+        """Minimize automaton by merging states with equivalent suffix behavior."""
+        if self.is_minimized:
+            return
+
+        memo = {}
+        registry = {}
+        old_root = self._canonical_signature(self.root_state, memo, registry)
+
+        canon_size = len(registry)
+        canon_transitions = [{} for _ in range(canon_size)]
+        canon_outputs = [None for _ in range(canon_size)]
+        for signature, canon_state in registry.items():
+            out, children = signature
+            canon_outputs[canon_state] = out
+            canon_transitions[canon_state] = {ch: child for ch, child in children}
+
+        self._reindex_from_root(old_root, canon_transitions, canon_outputs)
+        self.is_minimized = True
+
+    def state_count(self):
+        """Return number of states currently stored in the automaton."""
+        return len(self.transitions)
+
+    def add(self, term, output):
+        """Add one accepted term into the transducer."""
+        self._ensure_mutable()
+        self._add_raw(term, output)
+
+    def accepts(self, term):
+        """Return True if term is accepted by the automaton."""
+        return self.transduce(term) is not None
+
     def transduce(self, term):
-        """Return output ID for term, or None if term is not in the FST."""
-        state = 0
+        """Return terminal output marker for term, or None if absent."""
+        state = self.root_state
         for ch in term:
             state = self.transitions[state].get(ch)
             if state is None:
@@ -109,7 +216,16 @@ class FSTTermMap:
 
     def __init__(self):
         self.id_to_str = []
+        self.str_to_id = {}
         self.fst = TermFST()
+
+    def minimize(self):
+        """Minimize underlying FST by merging equivalent suffix states."""
+        self.fst.minimize()
+
+    def state_count(self):
+        """Return current number of FST states."""
+        return self.fst.state_count()
 
     def __len__(self):
         """Return the number of terms stored in FSTTermMap."""
@@ -121,22 +237,25 @@ class FSTTermMap:
 
     def __get_id(self, s):
         """Return existing term ID, or create a new ID and insert it to FST."""
-        existing = self.fst.transduce(s)
+        existing = self.str_to_id.get(s)
         if existing is not None:
             return existing
 
         new_id = len(self.id_to_str)
         self.id_to_str.append(s)
-        self.fst.add(s, new_id)
+        self.str_to_id[s] = new_id
+        self.fst.add(s, True)
         return new_id
 
     def get_id_if_exists(self, s):
         """Return existing term ID for s, or None if absent."""
-        return self.fst.transduce(s)
+        if not self.fst.accepts(s):
+            return None
+        return self.str_to_id.get(s)
 
     def contains(self, s):
         """Return True if term s exists in the transducer."""
-        return self.get_id_if_exists(s) is not None
+        return self.fst.accepts(s)
 
     def __getitem__(self, key):
         """If key is int return term string, if str return/create term ID."""
@@ -159,6 +278,7 @@ class FSTTermMap:
         term_map = cls()
         for term in id_to_str:
             term_map[term]
+        term_map.minimize()
         return term_map
 
 def sorted_merge_posts_and_tfs(posts_tfs1, posts_tfs2):
@@ -224,6 +344,17 @@ if __name__ == '__main__':
     assert fst_term_map.get_id_if_exists("good") == 2, "fst lookup is incorrect"
     assert fst_term_map.get_id_if_exists("night") is None, "fst unknown lookup is incorrect"
     assert fst_term_map[1] == "everyone", "fst reverse lookup is incorrect"
+
+    suffix_map = FSTTermMap()
+    for term in ["cat", "bat", "rat"]:
+        suffix_map[term]
+    pre_min_states = suffix_map.state_count()
+    suffix_map.minimize()
+    post_min_states = suffix_map.state_count()
+    assert post_min_states < pre_min_states, "FST minimization did not reduce states"
+    assert suffix_map.get_id_if_exists("cat") == 0, "FST minimization changed mapping"
+    assert suffix_map.get_id_if_exists("bat") == 1, "FST minimization changed mapping"
+    assert suffix_map.get_id_if_exists("rat") == 2, "FST minimization changed mapping"
 
     docs = ["/collection/0/data0.txt",
             "/collection/0/data10.txt",

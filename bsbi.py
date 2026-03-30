@@ -52,6 +52,7 @@ class BSBIIndex:
     def save(self):
         """Save doc_id_map and term_id_map to output directory using pickle."""
 
+        self.term_id_map.minimize()
         with open(os.path.join(self.output_dir, 'terms.dict'), 'wb') as f:
             pickle.dump(self.term_id_map, f)
         with open(os.path.join(self.output_dir, 'docs.dict'), 'wb') as f:

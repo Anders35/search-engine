@@ -3,7 +3,7 @@
 ## Features
 
 - SPIMI-based indexing pipeline (default), with optional BSBI compatibility mode.
-- Term dictionary organized with a Finite State Transducer (FST) for term -> termID mapping.
+- Term dictionary organized with a minimized Finite State Transducer (FST), merging states with equivalent suffix/right-language.
 - Multiple postings compression options:
   - Standard (raw integer array)
   - Variable-Byte Encoding (VBE)
