@@ -2,7 +2,7 @@
 
 ## Features
 
-- BSBI-based indexing pipeline for large document collections split by blocks.
+- SPIMI-based indexing pipeline (default), with optional BSBI compatibility mode.
 - Multiple postings compression options:
   - Standard (raw integer array)
   - Variable-Byte Encoding (VBE)
@@ -20,7 +20,7 @@
 
 ## Project Structure
 
-- `bsbi.py`: Build intermediate indexes per block, then merge into one main index.
+- `bsbi.py`: Build inverted index with `spimi` (default) or `bsbi` mode, then merge into one main index.
 - `search.py`: Run ranked retrieval for sample queries.
 - `evaluation.py`: Evaluate retrieval quality using `queries.txt` and `qrels.txt`.
 - `index.py`: Disk-based inverted index reader/writer.
@@ -44,7 +44,18 @@ Run all commands from the project root folder.
 ### 1. Build the Index
 
 ```bash
-python bsbi.py --compression elias-gamma
+python bsbi.py --compression elias-gamma --indexing-mode spimi
+```
+
+Available indexing modes:
+
+- `spimi` (default)
+- `bsbi`
+
+SPIMI memory control (optional):
+
+```bash
+python bsbi.py --compression elias-gamma --indexing-mode spimi --spimi-max-terms 50000
 ```
 
 Available compression values:
@@ -56,7 +67,7 @@ Available compression values:
 Example with VBE:
 
 ```bash
-python bsbi.py --compression vbe
+python bsbi.py --compression vbe --indexing-mode spimi
 ```
 
 ### 2. Run Search

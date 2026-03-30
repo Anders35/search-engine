@@ -449,6 +449,8 @@ class BSBIIndex:
         Scans all collection data, calls parse_block for parsing,
         and calls invert_write for block-level inversion.
         """
+        self.intermediate_indices = []
+
         # Loop over each sub-directory in collection (one block per folder)
         for block_dir_relative in tqdm(sorted(next(os.walk(self.data_dir))[1])):
             td_pairs = self.parse_block(block_dir_relative)
@@ -467,14 +469,108 @@ class BSBIIndex:
                 self.merge(indices, merged_index)
 
 
+class SPIMIIndex(BSBIIndex):
+    """SPIMI indexer that reuses retrieval and merge logic from BSBIIndex."""
+
+    def _write_term_dict(self, term_dict, index):
+        """Write in-memory term dictionary in sorted termID order."""
+        for term_id in sorted(term_dict.keys()):
+            doc_tf = term_dict[term_id]
+            sorted_doc_id = sorted(doc_tf.keys())
+            assoc_tf = [doc_tf[doc_id] for doc_id in sorted_doc_id]
+            index.append(term_id, sorted_doc_id, assoc_tf)
+
+    def _flush_spimi_run(self, term_dict, run_id):
+        """Flush one SPIMI run to disk and clear in-memory dictionary."""
+        if not term_dict:
+            return run_id
+
+        index_id = f"intermediate_index_spimi_{run_id}"
+        self.intermediate_indices.append(index_id)
+
+        with InvertedIndexWriter(index_id, self.postings_encoding, directory = self.output_dir) as index:
+            self._write_term_dict(term_dict, index)
+
+        term_dict.clear()
+        return run_id + 1
+
+    def _iter_block_documents(self, block_dir_relative):
+        """Yield canonical relative document paths for one block."""
+        block_dir = "./" + self.data_dir + "/" + block_dir_relative
+        for filename in sorted(next(os.walk(block_dir))[2]):
+            yield block_dir + "/" + filename
+
+    def index(self, max_terms_in_memory = 50000):
+        """
+        Main routine for SPIMI (single-pass in-memory indexing).
+
+        Parameters
+        ----------
+        max_terms_in_memory: int
+            Maximum number of unique terms kept in memory before a flush.
+            Use a larger value if more RAM is available.
+        """
+        if max_terms_in_memory is not None and max_terms_in_memory <= 0:
+            raise ValueError("max_terms_in_memory must be a positive integer")
+
+        self.intermediate_indices = []
+        term_dict = {}
+        run_id = 1
+
+        block_dirs = sorted(next(os.walk(self.data_dir))[1])
+        for block_dir_relative in tqdm(block_dirs):
+            for docname in self._iter_block_documents(block_dir_relative):
+                doc_id = self.doc_id_map[docname]
+                with open(docname, "r", encoding = "utf8", errors = "surrogateescape") as f:
+                    for token in f.read().split():
+                        term_id = self.term_id_map[token]
+
+                        should_flush = (
+                            max_terms_in_memory is not None
+                            and term_id not in term_dict
+                            and len(term_dict) >= max_terms_in_memory
+                        )
+                        if should_flush:
+                            run_id = self._flush_spimi_run(term_dict, run_id)
+
+                        if term_id not in term_dict:
+                            term_dict[term_id] = {}
+
+                        if doc_id not in term_dict[term_id]:
+                            term_dict[term_id][doc_id] = 0
+                        term_dict[term_id][doc_id] += 1
+
+        self._flush_spimi_run(term_dict, run_id)
+        self.save()
+
+        with InvertedIndexWriter(self.index_name, self.postings_encoding, directory = self.output_dir) as merged_index:
+            if not self.intermediate_indices:
+                return
+
+            with contextlib.ExitStack() as stack:
+                indices = [stack.enter_context(InvertedIndexReader(index_id, self.postings_encoding, directory = self.output_dir))
+                           for index_id in self.intermediate_indices]
+                self.merge(indices, merged_index)
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Build BSBI inverted index')
+    parser = argparse.ArgumentParser(description='Build inverted index (SPIMI or BSBI)')
     parser.add_argument('--compression', default='elias-gamma',
                         choices=['standard', 'vbe', 'elias-gamma'],
                         help='Postings compression type')
+    parser.add_argument('--indexing-mode', default='spimi',
+                        choices=['spimi', 'bsbi'],
+                        help='Index construction algorithm')
+    parser.add_argument('--spimi-max-terms', type=int, default=50000,
+                        help='Maximum number of unique terms kept in-memory per SPIMI run')
     args = parser.parse_args()
 
-    BSBI_instance = BSBIIndex(data_dir = 'collection', \
-                              postings_encoding = get_postings_encoding(args.compression), \
-                              output_dir = 'index')
-    BSBI_instance.index()
+    indexer_class = SPIMIIndex if args.indexing_mode == 'spimi' else BSBIIndex
+    indexer = indexer_class(data_dir = 'collection', \
+                            postings_encoding = get_postings_encoding(args.compression), \
+                            output_dir = 'index')
+
+    if args.indexing_mode == 'spimi':
+        indexer.index(max_terms_in_memory = args.spimi_max_terms)
+    else:
+        indexer.index()
