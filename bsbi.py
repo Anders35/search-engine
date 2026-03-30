@@ -10,6 +10,7 @@ from index import InvertedIndexReader, InvertedIndexWriter
 from util import IdMap, FSTTermMap, sorted_merge_posts_tfs_positions
 from compression import StandardPostings, VBEPostings, EliasGammaPostings
 from tqdm import tqdm
+from lsi import LSIRetriever
 
 
 COMPRESSION_ENCODINGS = {
@@ -45,6 +46,8 @@ class BSBIIndex:
         self.output_dir = output_dir
         self.index_name = index_name
         self.postings_encoding = postings_encoding
+        self._lsi_retriever = None
+        self._lsi_config = None
 
         # Stores intermediate inverted index file names.
         self.intermediate_indices = []
@@ -563,6 +566,46 @@ class BSBIIndex:
 
             return sorted(scored_docs, key = lambda x: x[0], reverse = True)[:k]
 
+    def retrieve_lsi(self, query, k = 10, n_components = 256, n_iter = 7, rebuild_lsi = False):
+        """
+        Perform retrieval using LSI document vectors indexed with FAISS.
+
+        Notes
+        -----
+        - Uses sparse TF-IDF term-document matrix.
+        - Uses randomized TruncatedSVD for efficient dimensionality reduction.
+        - Stores FAISS index artifacts in output_dir for reuse.
+        """
+        if len(self.term_id_map) == 0 or len(self.doc_id_map) == 0:
+            self.load()
+
+        config = (int(n_components), int(n_iter))
+        needs_new_retriever = (
+            self._lsi_retriever is None
+            or self._lsi_config != config
+        )
+        if needs_new_retriever:
+            self._lsi_retriever = LSIRetriever(
+                index_name = self.index_name,
+                output_dir = self.output_dir,
+                postings_encoding = self.postings_encoding,
+            )
+            self._lsi_config = config
+
+        self._lsi_retriever.load_or_build(
+            term_id_map = self.term_id_map,
+            n_components = n_components,
+            n_iter = n_iter,
+            rebuild = rebuild_lsi,
+        )
+
+        return self._lsi_retriever.search(
+            query = query,
+            term_id_map = self.term_id_map,
+            doc_id_map = self.doc_id_map,
+            k = k,
+        )
+
     def retrieve(self, query, k = 10, scoring = 'tfidf', **kwargs):
         """
         Retrieval wrapper for selecting scoring scheme.
@@ -574,10 +617,10 @@ class BSBIIndex:
         k: int
             Number of top documents to return
         scoring: str
-            Scoring scheme: 'tfidf', 'bm25', 'phrase', or 'proximity'
+            Scoring scheme: 'tfidf', 'bm25', 'phrase', 'proximity', or 'lsi'
         kwargs:
             Extra parameters for specific schemes (e.g., k1, b for BM25,
-            window for proximity search)
+            window for proximity search, n_components and n_iter for LSI)
         """
         scoring = scoring.lower()
         if scoring == 'tfidf':
@@ -594,7 +637,13 @@ class BSBIIndex:
             return self.retrieve_proximity(query,
                                            k = k,
                                            window = kwargs.get('window', 5))
-        raise ValueError("scoring must be 'tfidf', 'bm25', 'phrase', or 'proximity'")
+        if scoring == 'lsi':
+            return self.retrieve_lsi(query,
+                                     k = k,
+                                     n_components = kwargs.get('lsi_components', 256),
+                                     n_iter = kwargs.get('lsi_n_iter', 7),
+                                     rebuild_lsi = kwargs.get('rebuild_lsi', False))
+        raise ValueError("scoring must be 'tfidf', 'bm25', 'phrase', 'proximity', or 'lsi'")
 
     def index(self):
         """

@@ -135,7 +135,8 @@ def load_qrels(qrel_file = "qrels.txt", max_q_id = 30, max_doc_id = 1033):
 ######## >>>>> EVALUATION
 
 def eval(qrels, query_file = "queries.txt", k = 1000, scoring = 'tfidf', k1 = 1.2, b = 0.75,
-         compression = 'elias-gamma', bm25_retrieval = 'wand'):
+         compression = 'elias-gamma', bm25_retrieval = 'wand',
+         lsi_components = 256, lsi_n_iter = 7, rebuild_lsi = False):
   """ 
     Loop through all 30 queries, compute per-query metrics,
     then compute mean scores over all queries.
@@ -164,7 +165,10 @@ def eval(qrels, query_file = "queries.txt", k = 1000, scoring = 'tfidf', k1 = 1.
                                                  scoring = scoring,
                                                  k1 = k1,
                                                  b = b,
-                                                 use_wand = use_wand):
+                                                 use_wand = use_wand,
+                                                 lsi_components = lsi_components,
+                                                 lsi_n_iter = lsi_n_iter,
+                                                 rebuild_lsi = rebuild_lsi):
         did = int(re.search(r'\/.*\/.*\/(.*)\.txt', doc).group(1))
         ranking.append(qrels[qid][did])
       rbp_scores.append(rbp(ranking))
@@ -183,13 +187,19 @@ if __name__ == '__main__':
   parser.add_argument('--compression', default='elias-gamma',
                       choices=['standard', 'vbe', 'elias-gamma'],
                       help='Postings compression type used when reading the index')
-  parser.add_argument('--scoring', default='all', choices=['all', 'tfidf', 'bm25'],
+  parser.add_argument('--scoring', default='all', choices=['all', 'tfidf', 'bm25', 'lsi'],
                       help='Scoring scheme to evaluate')
   parser.add_argument('-k', type=int, default=1000, help='Top-K documents per query for evaluation')
   parser.add_argument('--k1', type=float, default=1.2, help='BM25 k1 parameter')
   parser.add_argument('--b', type=float, default=0.75, help='BM25 b parameter')
   parser.add_argument('--bm25', default='wand', choices=['wand', 'taat'],
                       help='BM25 retrieval mode')
+  parser.add_argument('--lsi-components', type=int, default=256,
+                      help='Number of latent dimensions for LSI evaluation')
+  parser.add_argument('--lsi-n-iter', type=int, default=7,
+                      help='Randomized SVD power iterations for LSI evaluation')
+  parser.add_argument('--rebuild-lsi', action='store_true',
+                      help='Force rebuild of LSI model before evaluation')
   args = parser.parse_args()
 
   qrels = load_qrels()
@@ -211,3 +221,12 @@ if __name__ == '__main__':
          b = args.b,
          compression = args.compression,
          bm25_retrieval = args.bm25)
+  if args.scoring in ['all', 'lsi']:
+    eval(qrels,
+         k = args.k,
+         scoring = 'lsi',
+         compression = args.compression,
+         bm25_retrieval = args.bm25,
+         lsi_components = args.lsi_components,
+         lsi_n_iter = args.lsi_n_iter,
+         rebuild_lsi = args.rebuild_lsi)

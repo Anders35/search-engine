@@ -16,6 +16,7 @@
     - WAND (faster top-k pruning)
   - Exact phrase retrieval using positional postings (`--scoring phrase`)
   - Proximity retrieval with configurable token window (`--scoring proximity --window N`)
+  - LSI retrieval with FAISS ANN backend (`--scoring lsi`)
 - Evaluation module over 30 benchmark queries using:
   - RBP
   - DCG
@@ -83,15 +84,20 @@ python search.py --compression elias-gamma --scoring bm25 --bm25 wand -k 10
 Parameters:
 
 - `--compression`: postings encoding used by the index
-- `--scoring`: `tfidf`, `bm25`, `phrase`, or `proximity`
+- `--scoring`: `tfidf`, `bm25`, `phrase`, `proximity`, or `lsi`
 - `--bm25`: `wand` or `taat` (used when `--scoring bm25`)
 - `--window`: maximum positional window for proximity search (used when `--scoring proximity`)
+- `--lsi-components`: latent dimensions for LSI (used when `--scoring lsi`)
+- `--lsi-n-iter`: randomized SVD iterations for LSI (used when `--scoring lsi`)
+- `--rebuild-lsi`: force rebuilding LSI model and FAISS index artifacts
 - `-k`: number of top documents to return
 
 Important:
 
 - The `--compression` value in search must match the one used when indexing.
 - `search.py` currently runs three predefined sample queries. To test custom queries, edit the `queries` list in `search.py`.
+- The first LSI run may be slower because the sparse TF-IDF matrix, randomized SVD,
+  and FAISS index are built and cached in `index/`.
 
 ### 3. Evaluate Retrieval Quality
 
@@ -102,11 +108,14 @@ python evaluation.py --compression elias-gamma --scoring all --bm25 wand -k 1000
 Parameters:
 
 - `--compression`: postings encoding used by the index
-- `--scoring`: `all`, `tfidf`, or `bm25`
+- `--scoring`: `all`, `tfidf`, `bm25`, or `lsi`
 - `--bm25`: `wand` or `taat`
 - `-k`: top-k depth per query
 - `--k1`: BM25 saturation parameter (default: 1.2)
 - `--b`: BM25 length-normalization parameter (default: 0.75)
+- `--lsi-components`: latent dimensions for LSI evaluation
+- `--lsi-n-iter`: randomized SVD iterations for LSI evaluation
+- `--rebuild-lsi`: force rebuilding LSI artifacts before evaluation
 
 Example BM25-only evaluation:
 

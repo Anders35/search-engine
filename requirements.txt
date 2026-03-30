@@ -1,1 +1,5 @@
 tqdm
+numpy
+scipy
+scikit-learn
+faiss-cpu
