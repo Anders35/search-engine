@@ -5,10 +5,13 @@ import heapq
 import time
 import math
 import argparse
+import re
 
 from index import InvertedIndexReader, InvertedIndexWriter
 from util import IdMap, FSTTermMap, sorted_merge_posts_tfs_positions
 from compression import StandardPostings, VBEPostings, EliasGammaPostings
+from nltk.stem import PorterStemmer
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 from tqdm import tqdm
 from lsi import LSIRetriever
 
@@ -46,6 +49,9 @@ class BSBIIndex:
         self.output_dir = output_dir
         self.index_name = index_name
         self.postings_encoding = postings_encoding
+        self._token_pattern = re.compile(r"[a-z0-9]+")
+        self._stopwords = set(ENGLISH_STOP_WORDS)
+        self._stemmer = PorterStemmer()
         self._lsi_retriever = None
         self._lsi_config = None
 
@@ -71,6 +77,22 @@ class BSBIIndex:
         with open(os.path.join(self.output_dir, 'docs.dict'), 'rb') as f:
             self.doc_id_map = pickle.load(f)
 
+    def preprocess_text(self, text):
+        """
+        Normalize text with case folding, stopword removal, and stemming.
+
+        Returns ordered normalized tokens that are used for both indexing
+        and query processing.
+        """
+        terms = []
+        for token in self._token_pattern.findall(text.casefold()):
+            if token in self._stopwords:
+                continue
+            stemmed = self._stemmer.stem(token)
+            if stemmed and stemmed not in self._stopwords:
+                terms.append(stemmed)
+        return terms
+
     def parse_block(self, block_dir_relative):
         """
         Parse text files into a sequence of <termID, docID, position> triples.
@@ -95,7 +117,7 @@ class BSBIIndex:
         for filename in next(os.walk(dir))[2]:
             docname = dir + "/" + filename
             with open(docname, "r", encoding = "utf8", errors = "surrogateescape") as f:
-                for position, token in enumerate(f.read().split(), start = 1):
+                for position, token in enumerate(self.preprocess_text(f.read()), start = 1):
                     td_pairs.append((self.term_id_map[token], self.doc_id_map[docname], position))
 
         return td_pairs
@@ -167,7 +189,7 @@ class BSBIIndex:
     def _get_query_term_ids(self, query):
         """Return term IDs that actually exist in the index vocabulary."""
         term_ids = []
-        for word in query.split():
+        for word in self.preprocess_text(query):
             term_id = self.term_id_map.get_id_if_exists(word)
             if term_id is not None:
                 term_ids.append(term_id)
@@ -532,7 +554,7 @@ class BSBIIndex:
         if window <= 0:
             raise ValueError("window must be a positive integer")
 
-        raw_terms = query.split()
+        raw_terms = self.preprocess_text(query)
         if len(raw_terms) < 2:
             return []
 
@@ -600,8 +622,9 @@ class BSBIIndex:
             rebuild = rebuild_lsi,
         )
 
+        normalized_query = " ".join(self.preprocess_text(query))
         return self._lsi_retriever.search(
-            query = query,
+            query = normalized_query,
             term_id_map = self.term_id_map,
             doc_id_map = self.doc_id_map,
             k = k,
@@ -728,7 +751,7 @@ class SPIMIIndex(BSBIIndex):
             for docname in self._iter_block_documents(block_dir_relative):
                 doc_id = self.doc_id_map[docname]
                 with open(docname, "r", encoding = "utf8", errors = "surrogateescape") as f:
-                    for position, token in enumerate(f.read().split(), start = 1):
+                    for position, token in enumerate(self.preprocess_text(f.read()), start = 1):
                         term_id = self.term_id_map[token]
 
                         should_flush = (
